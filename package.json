@@ -1,0 +1,16 @@
+{
+  "name": "ai-clinical-trial-suite",
+  "version": "1.0.0",
+  "description": "Merged clinical trial design, conduct, compliance, recruitment, and patient matching platform",
+  "private": true,
+  "scripts": {
+    "start": "bash start.sh",
+    "backend": "cd backend && npm start",
+    "frontend": "cd frontend && npm start",
+    "seed": "cd backend && node seed/seed.js",
+    "install-all": "npm install concurrently && cd backend && npm install && cd ../frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

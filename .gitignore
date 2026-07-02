@@ -1,0 +1,43 @@
+node_modules/
+build/
+backend/uploads/
+.env.local
+.DS_Store
+*.log
+.env
+.env.*
+*.key
+*.pem
+credentials.*
+secrets.*
+
+# --- secrets (auto-added) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/credentials*.json
+**/serviceAccount*.json
+
+!.env.example
+
+# Safe template files are allowed.
+!.env.example
+!.env.example
+
+# --- secrets: never commit ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+token.txt
+*.token
+.npmrc
+id_rsa*
+**/credentials*.json
+**/serviceAccount*.json
+
+!.env.example
