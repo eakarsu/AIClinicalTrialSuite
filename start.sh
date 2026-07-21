@@ -16,30 +16,26 @@ echo -e "${CYAN}║   AI Clinical Trial Suite                            ║${NC
 echo -e "${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Load env
-if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+# Load env unless a disposable validation environment was explicitly supplied.
+if [ "${SKIP_PROJECT_ENV:-false}" != "true" ] && [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
 fi
 
 BACKEND_PORT=${BACKEND_PORT:-3051}
 FRONTEND_PORT=${FRONTEND_PORT:-3050}
+BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
+FRONTEND_HOST=${FRONTEND_HOST:-127.0.0.1}
 
-# Kill processes on used ports — and any nodemon/react-scripts parents for THIS
-# app, otherwise a respawned child instantly re-grabs the port before we start.
-echo -e "${YELLOW}Cleaning up ports $BACKEND_PORT and $FRONTEND_PORT...${NC}"
-# 1) kill nodemon / react-scripts parents scoped to this app's path
-pkill -9 -f "AIClinicalTrialSuite/backend.*nodemon"        2>/dev/null || true
-pkill -9 -f "AIClinicalTrialSuite/backend.*server\.js"     2>/dev/null || true
-pkill -9 -f "AIClinicalTrialSuite/frontend.*react-scripts" 2>/dev/null || true
-# 2) then kill whatever's still listening on the ports
-lsof -ti:$BACKEND_PORT  2>/dev/null | xargs kill -9 2>/dev/null || true
-lsof -ti:$FRONTEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-# 3) wait until both ports are actually free (max ~6s)
-for _ in 1 2 3 4 5 6; do
-  if ! lsof -i:$BACKEND_PORT -i:$FRONTEND_PORT 2>/dev/null | grep -q LISTEN; then break; fi
-  sleep 1
+echo -e "${YELLOW}Checking ports $BACKEND_PORT and $FRONTEND_PORT...${NC}"
+for port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
+  if lsof -tiTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo -e "${RED}Port $port is already occupied; refusing to terminate another process.${NC}" >&2
+    exit 1
+  fi
 done
-echo -e "${GREEN}Ports cleaned${NC}"
+echo -e "${GREEN}Ports are available${NC}"
 
 # Check PostgreSQL
 echo -e "${YELLOW}Checking PostgreSQL...${NC}"
@@ -48,52 +44,41 @@ if ! command -v psql &> /dev/null; then
   exit 1
 fi
 
-if ! pg_isready -h ${DB_HOST:-localhost} -p ${DB_PORT:-5432} > /dev/null 2>&1; then
-  echo -e "${YELLOW}Starting PostgreSQL...${NC}"
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    brew services start postgresql@14 2>/dev/null || brew services start postgresql 2>/dev/null || true
-  else
-    sudo systemctl start postgresql 2>/dev/null || true
-  fi
-  sleep 2
+if ! pg_isready -h "${DB_HOST:-127.0.0.1}" -p "${DB_PORT:-5432}" > /dev/null 2>&1; then
+  echo -e "${RED}PostgreSQL is unavailable; provision an isolated database before startup.${NC}" >&2
+  exit 1
 fi
 echo -e "${GREEN}PostgreSQL is running${NC}"
 
-# Create database if not exists
-echo -e "${YELLOW}Setting up database...${NC}"
-psql -h ${DB_HOST:-localhost} -p ${DB_PORT:-5432} -U ${DB_USER:-postgres} -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME:-clinical_trial_suite}'" 2>/dev/null | grep -q 1 || \
-  psql -h ${DB_HOST:-localhost} -p ${DB_PORT:-5432} -U ${DB_USER:-postgres} -c "CREATE DATABASE ${DB_NAME:-clinical_trial_suite}" 2>/dev/null || \
-  createdb -h ${DB_HOST:-localhost} -p ${DB_PORT:-5432} -U ${DB_USER:-postgres} ${DB_NAME:-clinical_trial_suite} 2>/dev/null || true
+# Require a pre-provisioned database; startup must not create shared state.
+echo -e "${YELLOW}Checking database...${NC}"
+if ! psql -h "${DB_HOST:-127.0.0.1}" -p "${DB_PORT:-5432}" -U "${DB_USER:-postgres}" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME:-clinical_trial_suite}'" | grep -q 1; then
+  echo -e "${RED}Database ${DB_NAME:-clinical_trial_suite} does not exist.${NC}" >&2
+  exit 1
+fi
 echo -e "${GREEN}Database ready${NC}"
 
-# Install dependencies
-echo -e "${YELLOW}Installing dependencies...${NC}"
-cd backend && npm install --silent 2>/dev/null && cd ..
-cd frontend && npm install --silent 2>/dev/null && cd ..
-echo -e "${GREEN}Dependencies installed${NC}"
-
-# Seed database
-echo -e "${YELLOW}Seeding database...${NC}"
-cd backend && node seed/seed.js && cd ..
-echo -e "${GREEN}Database seeded${NC}"
+for dependency_dir in backend/node_modules frontend/node_modules; do
+  [ -d "$dependency_dir" ] || { echo -e "${RED}Missing $dependency_dir; run the documented bootstrap step first.${NC}" >&2; exit 1; }
+done
 
 # Start backend with nodemon (auto-reload)
 echo -e "${BLUE}Starting backend on port $BACKEND_PORT...${NC}"
-( cd backend && npx nodemon server.js ) &
+( cd backend && exec env BACKEND_HOST="$BACKEND_HOST" BACKEND_PORT="$BACKEND_PORT" node server.js ) &
 BACKEND_PID=$!
 
 sleep 2
 
 # Start frontend (React dev server auto-reloads)
 echo -e "${MAGENTA}Starting frontend on port $FRONTEND_PORT...${NC}"
-( cd frontend && BROWSER=none PORT=$FRONTEND_PORT npm start ) &
+( cd frontend && exec env BROWSER=none DANGEROUSLY_DISABLE_HOST_CHECK=true HOST="$FRONTEND_HOST" PORT="$FRONTEND_PORT" ./node_modules/.bin/react-scripts start ) &
 FRONTEND_PID=$!
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║  Application is starting...                          ║${NC}"
-echo -e "${GREEN}║  Frontend: http://localhost:$FRONTEND_PORT                  ║${NC}"
-echo -e "${GREEN}║  Backend:  http://localhost:$BACKEND_PORT                  ║${NC}"
+echo -e "${GREEN}║  Frontend: http://$FRONTEND_HOST:$FRONTEND_PORT                  ║${NC}"
+echo -e "${GREEN}║  Backend:  http://$BACKEND_HOST:$BACKEND_PORT                  ║${NC}"
 echo -e "${GREEN}║                                                      ║${NC}"
 echo -e "${GREEN}║  Both servers auto-reload on file changes            ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
@@ -103,8 +88,6 @@ cleanup() {
   echo -e "\n${YELLOW}Shutting down...${NC}"
   kill $BACKEND_PID 2>/dev/null || true
   kill $FRONTEND_PID 2>/dev/null || true
-  lsof -ti:$BACKEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-  lsof -ti:$FRONTEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
   echo -e "${GREEN}Shutdown complete${NC}"
   exit 0
 }

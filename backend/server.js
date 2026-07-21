@@ -7,6 +7,7 @@ const { authenticateToken, requireWrite } = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.BACKEND_PORT || 3051;
+const HOST = process.env.BACKEND_HOST || '127.0.0.1';
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({ origin: true, credentials: true }));
@@ -147,6 +148,6 @@ app.get('/api/dashboard/stats', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`\nClinical Trial Suite API running on http://localhost:${PORT}\n`);
+app.listen(PORT, HOST, () => {
+  console.log(`\nClinical Trial Suite API running on http://${HOST}:${PORT}\n`);
 });
