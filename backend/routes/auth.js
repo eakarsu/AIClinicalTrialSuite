@@ -5,6 +5,11 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 
+router.get('/demo-credentials', (_req, res) => {
+  if (process.env.NODE_ENV === 'production') return res.status(404).json({ error: 'Not found' });
+  return res.json({ email: 'pi@trials.io', password: 'trial2026' });
+});
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
